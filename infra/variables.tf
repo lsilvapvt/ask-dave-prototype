@@ -46,3 +46,20 @@ variable "llm_api_key_version" {
   type        = number
   default     = 1
 }
+
+variable "log_retention_days" {
+  description = "Days to keep Lambda and API access logs in CloudWatch."
+  type        = number
+  default     = 14
+}
+
+variable "history_limit" {
+  description = "Maximum number of most recent questions and answers GET /history returns."
+  type        = number
+  default     = 50
+
+  validation {
+    condition     = var.history_limit >= 1 && var.history_limit <= 500
+    error_message = "history_limit must be between 1 and 500."
+  }
+}

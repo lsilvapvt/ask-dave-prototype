@@ -80,3 +80,36 @@ def test_secret_values_use_write_only_arguments():
         assert "secret_string_wo_version" in body, (
             f"aws_secretsmanager_secret_version.{name} needs secret_string_wo_version"
         )
+
+
+def test_each_lambda_has_its_own_role():
+    roles = {
+        name: re.search(r"^\s*role\s*=\s*aws_iam_role\.(\w+)\.arn", body, re.M)
+        for name, body in blocks(TF, "resource", "aws_lambda_function").items()
+    }
+    assert all(roles.values()), f"every Lambda must use a Terraform-managed role: {roles}"
+    role_names = [m.group(1) for m in roles.values()]
+    assert len(role_names) == len(set(role_names)), "Lambdas must not share an IAM role"
+
+
+def test_history_role_cannot_touch_secrets_or_write_data():
+    policy = blocks(TF, "data", "aws_iam_policy_document").get("history")
+    if policy is None:
+        return
+    assert "secretsmanager" not in policy, "the history function must not read secrets"
+    assert "s3:PutObject" not in policy, "the history function is read-only"
+
+
+def test_lambda_roles_cannot_create_log_groups_or_use_broad_managed_policies():
+    # Log groups are Terraform-managed; a Lambda that can create its own would
+    # recreate one that outlives `terraform destroy`.
+    code = "\n".join(line for line in TF.splitlines() if not line.lstrip().startswith(("#", "//")))
+    assert "logs:CreateLogGroup" not in code
+    assert "AWSLambdaBasicExecutionRole" not in code
+
+
+def test_lambda_permissions_are_scoped_to_a_source():
+    for name, body in blocks(TF, "resource", "aws_lambda_permission").items():
+        assert re.search(r"^\s*source_arn\s*=", body, re.M), (
+            f"aws_lambda_permission.{name} needs source_arn, or any API could invoke the function"
+        )

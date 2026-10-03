@@ -47,6 +47,15 @@ Key pattern: `history/<ISO-8601-timestamp>_<uuid>.json`. Lexicographic sort on t
 
 This design also frames what breaks first at 1,000 users (see below).
 
+## History endpoint details
+
+- **Reading:** `ListObjectsV2` over `history/`, keys sorted descending, the newest `history_limit` (default 50) fetched with parallel `GetObject` calls on a small thread pool. S3 lists keys only in ascending order, so every request reads the full key list: fine for a prototype, and the first thing DynamoDB replaces (see "What breaks first").
+- **Robustness:** a corrupt or vanished object is skipped and logged, never fatal to the page. Only the contract fields (`prompt`, `response`, `timestamp`) are returned, whatever else an object holds.
+- **Errors are not swallowed:** if listing fails, the exception propagates. Lambda logs the traceback and counts it in the `Errors` metric the CloudWatch alarm watches, and API Gateway returns 500. Returning a hand-made 500 would hide the failure from that alarm.
+- **Runtime:** Python 3.14 on arm64 (Graviton, about 20% cheaper than x86), 256 MB, 10 s timeout.
+- **No reserved concurrency:** new AWS accounts often have a low concurrency quota, and reserving any can fail the deploy. API Gateway throttling bounds load instead.
+- **CORS** is open to any origin until the frontend exists, then narrowed to the CloudFront domain.
+
 ## IAM / secrets / observability
 
 - LLM API key lives in **Secrets Manager**. The Lambda environment variable holds only the **secret's ARN**, never the key value — satisfies "not in plain environment variables" literally, not just in spirit.
@@ -55,7 +64,9 @@ This design also frames what breaks first at 1,000 users (see below).
 - **Destroy doesn't need the key.** Terraform requires every variable without a default even for destroy, so `destroy.sh` supplies a dummy value.
 - **Encryption uses AWS-managed keys** (SSE-S3, and the default Secrets Manager key). A customer-managed KMS key costs about $1/month even when idle. Checkov suppressions name each accepted finding inline with its reason.
 - IAM policies scope `s3:GetObject`/`PutObject`/`ListBucket` to the specific bucket/prefix only, and `secretsmanager:GetSecretValue` to the one specific secret ARN only — no wildcard resources.
-- Lambda logs to CloudWatch automatically (default execution role includes `logs:CreateLogGroup/CreateLogStream/PutLogEvents`, scoped to the function's own log group).
+- **Log groups are created by Terraform**, not by Lambda on first run. A log group Lambda creates itself is untagged, unmanaged, and survives `terraform destroy`. Each function's role may only write streams and events to its own group, with no `logs:CreateLogGroup`. That replaces the `AWSLambdaBasicExecutionRole` managed policy, which allows writing to any log group in the account. Retention defaults to 14 days.
+- **API access logs:** the HTTP API stage writes one JSON line per request (route, status, latencies, integration errors) to its own Terraform-managed log group.
+- **Invoke permissions are per route:** each `aws_lambda_permission` is scoped to the exact API route via `source_arn`, so no other API or route can invoke the function.
 - A CloudWatch alarm watches the Lambda `Errors` metric. (Optional: an SNS topic for notification; the requirement is only an alarm that triggers.)
 
 ## Deploy / destroy ergonomics

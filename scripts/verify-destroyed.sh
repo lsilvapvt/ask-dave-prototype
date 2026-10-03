@@ -30,9 +30,35 @@ for arn in $arns; do
       if [[ "$deleted" == "None" ]]; then
         echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
       fi ;;
+    arn:*:lambda:*:function:*)
+      if aws lambda get-function --function-name "$arn" --region "$region" >/dev/null 2>&1; then
+        echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
+      fi ;;
+    arn:*:logs:*:log-group:*)
+      name=${arn#*:log-group:}; name=${name%:\*}
+      if [[ "$(aws logs describe-log-groups --log-group-name-prefix "$name" --region "$region" \
+          --query "length(logGroups[?logGroupName=='$name'])" --output text)" != 0 ]]; then
+        echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
+      fi ;;
+    arn:*:apigateway:*::/apis/*)
+      if aws apigatewayv2 get-api --api-id "${arn##*/apis/}" --region "$region" >/dev/null 2>&1; then
+        echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
+      fi ;;
     *)
       echo "  LEFT  $arn (no specific check; verify manually)"; leftovers=$((leftovers + 1)) ;;
   esac
+done
+
+# Not everything shows up in the tagging API: IAM is global, and a log group that
+# Lambda auto-created (the classic leftover) carries no tags. Check those by name.
+for role in $(aws iam list-roles --query "Roles[?starts_with(RoleName, '$project-')].RoleName" --output text); do
+  echo "  LEFT  IAM role $role"; leftovers=$((leftovers + 1))
+done
+for prefix in "/aws/lambda/$project-" "/aws/apigateway/$project-"; do
+  for group in $(aws logs describe-log-groups --log-group-name-prefix "$prefix" --region "$region" \
+      --query 'logGroups[].logGroupName' --output text); do
+    echo "  LEFT  log group $group"; leftovers=$((leftovers + 1))
+  done
 done
 
 if ((leftovers)); then

@@ -3,7 +3,7 @@
 # runtime already provides.
 
 [tool.ruff]
-target-version = "py313"  # matches the Lambda runtime this stack will use
+target-version = "py314"  # matches the Lambda runtime this stack will use
 line-length = 100
 extend-exclude = [".venv", ".venv-checkov"]
 

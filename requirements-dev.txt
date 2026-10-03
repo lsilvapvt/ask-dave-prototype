@@ -1,3 +1,4 @@
 # Local and CI tooling for the Python side. Not deployed to AWS.
 ruff==0.16.10
 pytest==9.1.1
+boto3==1.43.108  # provided by the Lambda runtime; needed here only to run the handler tests

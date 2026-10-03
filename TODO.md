@@ -8,7 +8,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 
 1. [x] Tooling and CI skeleton (nothing deployed): providers, variables, `scripts/check.sh`, `.github/workflows/ci.yml`, guard tests
 2. [x] Storage and secret: data bucket, Secrets Manager secret (write-only, `recovery_window_in_days = 0`), default tags, `scripts/smoke-test.sh`, `scripts/verify-destroyed.sh`
-3. [ ] `history` Lambda + HTTP API `GET /history` (Terraform-managed log group, scoped IAM, CORS)
+3. [x] `history` Lambda + HTTP API `GET /history` (Terraform-managed log groups, scoped IAM, CORS, access logs, handler unit tests)
 4. [ ] `chat` Lambda + `POST /chat` (needs the LLM provider decision)
 5. [ ] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain
 6. [ ] CloudWatch `Errors` alarms (optional SNS email)
@@ -22,11 +22,11 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [ ] S3 frontend bucket (CloudFront iteration)
 - [x] Secrets Manager secret holding `llm_api_key` (write-only value: never in Terraform state)
 - [ ] IAM role + policy for `chat` Lambda (Secrets Manager read on the one secret + S3 `PutObject` on the data bucket/prefix)
-- [ ] IAM role + policy for `history` Lambda (S3 `GetObject`/`ListBucket` on the data bucket/prefix only)
+- [x] IAM role + policy for `history` Lambda (`ListBucket` limited to `history/`, `GetObject` on `history/*`, writes only its own log group; verified with the IAM policy simulator)
 - [ ] `backend/chat/handler.py` — parse `{"prompt"}`, call LLM via `urllib`, write `{prompt, response, timestamp}` to S3, return it
-- [ ] `backend/history/handler.py` — list + fetch recent S3 objects under `history/`, return newest-first
-- [ ] Lambda function resources (zip via `archive_file` data source — no external deps, no layer)
-- [ ] API Gateway HTTP API with `POST /chat` and `GET /history` routes, Lambda proxy integrations, CORS enabled
+- [x] `backend/history/handler.py` — list + fetch recent S3 objects under `history/`, return newest-first (corrupt objects skipped and logged)
+- [ ] Lambda function resources (zip via `archive_file` data source — no external deps, no layer) — `history` done, `chat` next
+- [ ] API Gateway HTTP API with `POST /chat` and `GET /history` routes, Lambda proxy integrations, CORS enabled — `GET /history` done
 - [ ] CloudFront distribution + Origin Access Control in front of the frontend bucket
 - [ ] `frontend/config.js.tmpl` rendered via `templatefile()` with the live API Gateway URL, uploaded as `aws_s3_object` (not committed as a static file — deploy-time generated)
 - [ ] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file)

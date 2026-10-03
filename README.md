@@ -25,7 +25,7 @@ The region defaults to `us-east-1`. Override it with `export TF_VAR_aws_region=<
 ./scripts/deploy.sh
 ```
 
-To check the deployed stack afterwards:
+To check the deployed stack afterwards (it adds a few sample history entries and always removes them):
 
 ```bash
 ./scripts/smoke-test.sh

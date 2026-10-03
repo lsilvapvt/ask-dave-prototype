@@ -47,14 +47,14 @@ askdave-prototype/
 ├── backend/
 │   ├── chat/handler.py                # POST /chat: calls the LLM, writes to S3, returns {prompt, response, timestamp}
 │   └── history/handler.py             # GET /history: lists and returns S3 objects, newest first
-├── infra/                             # Terraform: main.tf (naming), storage.tf, secrets.tf, ... one file per concern
+├── infra/                             # Terraform, one file per concern: main.tf (naming), storage.tf, secrets.tf, iam.tf, lambda.tf, api.tf
 ├── scripts/
 │   ├── deploy.sh / destroy.sh
 │   ├── smoke-test.sh                  # post-deploy checks against the live stack
 │   ├── verify-destroyed.sh            # post-destroy leftover check (run by destroy.sh)
 │   ├── setup-dev.sh                   # local dev tooling (venvs)
 │   └── check.sh                       # local run of the CI static checks
-├── tests/                             # pytest guard tests (hard constraints, destroy-cleanup rules)
+├── tests/                             # pytest: guard tests (constraints, destroy rules, least privilege) + handler unit tests
 └── .github/workflows/ci.yml           # static checks only, no AWS credentials
 ```
 

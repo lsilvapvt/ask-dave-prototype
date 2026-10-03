@@ -14,3 +14,8 @@ output "llm_api_key_secret_arn" {
   description = "ARN of the Secrets Manager secret holding the LLM API key. The ARN is not sensitive; the value is never output."
   value       = aws_secretsmanager_secret.llm_api_key.arn
 }
+
+output "api_url" {
+  description = "Base URL of the HTTP API. The frontend's config.js points here."
+  value       = aws_apigatewayv2_api.http.api_endpoint
+}

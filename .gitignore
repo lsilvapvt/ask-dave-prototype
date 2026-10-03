@@ -36,3 +36,6 @@ venv/
 
 # Local-only reference documents
 docs/*.pdf
+
+# Lambda zips built by Terraform (archive_file)
+infra/.build/

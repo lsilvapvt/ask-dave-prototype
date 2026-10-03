@@ -1,0 +1,8 @@
+# IaC security scan config. Deliberately accepted findings are suppressed inline
+# next to the resource, with a one-line reason, rather than skipped globally here.
+directory:
+  - infra
+framework:
+  - terraform
+compact: true
+quiet: true

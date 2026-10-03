@@ -1,0 +1,3 @@
+# Installed in its own virtualenv: checkov pins old versions of boto3 and other
+# libraries that would otherwise clash with the test environment.
+checkov==3.3.22

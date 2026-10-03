@@ -1,0 +1,5 @@
+// Rendered by Terraform's templatefile() at deploy time — see infra/main.tf.
+// The rendered output (frontend/config.js, gitignored) is uploaded to the frontend
+// S3 bucket alongside index.html as part of `terraform apply`. Never commit a static
+// config.js, and never hand-edit index.html to point at a hardcoded URL instead.
+window.APP_CONFIG = { apiUrl: "${api_url}" };

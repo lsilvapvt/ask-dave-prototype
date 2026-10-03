@@ -1,0 +1,18 @@
+# Dev tooling config only. The Lambda code itself has no dependencies to install:
+# it uses the Python standard library plus boto3, which the AWS Lambda Python
+# runtime already provides.
+
+[tool.ruff]
+target-version = "py313"  # matches the Lambda runtime this stack will use
+line-length = 100
+extend-exclude = [".venv", ".venv-checkov"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # plain assert is the pytest idiom
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"

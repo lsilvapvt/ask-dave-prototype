@@ -1,0 +1,38 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.tfstate.lock.info
+
+# Generated, deploy-time frontend config (rendered by Terraform, never committed)
+frontend/config.js
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.zip
+
+# Secrets / local env
+.env
+.envrc
+
+# OS
+.DS_Store
+
+# Local tooling caches
+.pytest_cache/
+.ruff_cache/
+.venv-checkov/
+
+# Local-only reference documents
+docs/*.pdf

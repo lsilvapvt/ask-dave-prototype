@@ -113,3 +113,26 @@ def test_lambda_permissions_are_scoped_to_a_source():
         assert re.search(r"^\s*source_arn\s*=", body, re.M), (
             f"aws_lambda_permission.{name} needs source_arn, or any API could invoke the function"
         )
+
+
+def test_chat_role_can_only_read_the_key_and_add_history():
+    policy = blocks(TF, "data", "aws_iam_policy_document").get("chat")
+    if policy is None:
+        return
+    actions = set(re.findall(r'"((?:s3|secretsmanager|logs|kms):[A-Za-z*]+)"', policy))
+    assert actions == {
+        "secretsmanager:GetSecretValue",
+        "s3:PutObject",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+    }, f"unexpected chat permissions: {sorted(actions)}"
+    assert "aws_secretsmanager_secret.llm_api_key.arn" in policy, "scope the secret by its ARN"
+
+
+def test_llm_key_only_flows_into_the_write_only_secret():
+    # var.llm_api_key may feed exactly one attribute: the write-only secret value
+    # (plus the variable's own validation condition). Anywhere else (a Lambda
+    # environment, an output, a tag) would expose it.
+    code = "\n".join(line for line in TF.splitlines() if not line.lstrip().startswith(("#", "//")))
+    uses = re.findall(r"^\s*(\w+)\s*=.*\bvar\.llm_api_key\b(?!_)", code, re.M)
+    assert sorted(uses) == ["condition", "secret_string_wo"], f"var.llm_api_key used in: {uses}"

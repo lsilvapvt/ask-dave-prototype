@@ -32,7 +32,9 @@ Python is concise for small handlers, and the Lambda runtime ships boto3 for AWS
 
 AskDave is bring-your-own-key: whoever deploys it supplies their own LLM API key, which must live in Secrets Manager. Bedrock authenticates via IAM rather than a standalone API key, and requires per-account model access setup, so a direct provider API keeps deployment portable and the secret-handling path explicit. Use a direct provider API (Anthropic Claude Haiku-class, or OpenAI `gpt-4o-mini`-class) with a cheap/fast model — final pick depends on which key is easiest to test against during development.
 
-**Decision:** _(fill in once confirmed — Anthropic vs. OpenAI, model name)_
+**Decision:** the Anthropic Messages API, called directly over HTTPS, with **Claude Haiku 4.5** (`claude-haiku-4-5`) as the default model for cost: $1 / $5 per million input / output tokens, roughly a quarter of a cent per typical question. It is also the fastest current Claude model, which keeps replies well inside API Gateway's ~29-second limit. The model is a Terraform variable (`llm_model`), so a deployment can switch to `claude-sonnet-5-5` or `claude-opus-5-5` for stronger answers without code changes.
+
+**Bedrock was considered and rejected** for this prototype: it authenticates via IAM, so there is no key for Secrets Manager to protect; Anthropic models on Bedrock usually need a one-time per-account use-case form (a manual step); newer models are often served through cross-region inference profiles that complicate least-privilege IAM; and new accounts can have very low Bedrock quotas. It remains a good option for teams that prefer IAM-only auth and AWS billing.
 
 ## IaC tool: Terraform, not Pulumi or CloudFormation
 
@@ -55,6 +57,15 @@ This design also frames what breaks first at 1,000 users (see below).
 - **Runtime:** Python 3.14 on arm64 (Graviton, about 20% cheaper than x86), 256 MB, 10 s timeout.
 - **No reserved concurrency:** new AWS accounts often have a low concurrency quota, and reserving any can fail the deploy. API Gateway throttling bounds load instead.
 - **CORS** is open to any origin until the frontend exists, then narrowed to the CloudFront domain.
+
+## Chat endpoint details
+
+- **Request:** `POST /chat` with `{"prompt": "..."}`. Missing, blank, non-string, or overlong prompts (default limit 4,000 characters, `max_prompt_chars`) get HTTP 400 without calling the LLM.
+- **LLM call:** the Anthropic Messages API over HTTPS via `urllib`, with a short system prompt asking for plain text (the page shows answers as plain text). Answers are capped at `llm_max_tokens` (default 1,024) to bound the cost of each request. Haiku 4.5 runs without extended thinking, which suits short chat answers and keeps latency around a second or two.
+- **Timeouts and retries:** the function's 28-second timeout sits just under API Gateway's 30-second integration limit. The LLM call is budgeted against the remaining Lambda time, keeping a few seconds to save and respond. Transient failures (HTTP 408, 429, 5xx, 529 "overloaded", network errors) get one retry; permanent ones (bad key, bad request) fail immediately.
+- **Failures propagate:** like the history endpoint, LLM and S3 failures are not turned into hand-made responses. Lambda counts them in the `Errors` metric the alarm watches, and API Gateway returns 500. A failed LLM call saves nothing.
+- **Secret caching:** the key is fetched from Secrets Manager on first use and cached in the container for five minutes, so most requests skip that call and a rotated key still takes effect within minutes. The key never appears in logs or error messages (covered by a unit test).
+- **Timestamps:** UTC with millisecond precision (`2026-10-03T18:08:50.252Z`). Fixed width keeps object keys sorting chronologically, and three fractional digits parse reliably in every browser.
 
 ## IAM / secrets / observability
 

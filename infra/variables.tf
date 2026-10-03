@@ -63,3 +63,36 @@ variable "history_limit" {
     error_message = "history_limit must be between 1 and 500."
   }
 }
+
+variable "llm_model" {
+  description = "Anthropic model ID used for answers. Defaults to Claude Haiku 4.5 for cost; claude-sonnet-5-5 or claude-opus-5-5 give stronger answers at higher cost."
+  type        = string
+  default     = "claude-haiku-4-5"
+
+  validation {
+    condition     = can(regex("^claude-[a-z0-9.-]+$", var.llm_model))
+    error_message = "llm_model must be an Anthropic model ID, for example claude-haiku-4-5."
+  }
+}
+
+variable "llm_max_tokens" {
+  description = "Maximum length of one answer in tokens. Caps the cost of each request."
+  type        = number
+  default     = 1024
+
+  validation {
+    condition     = var.llm_max_tokens >= 64 && var.llm_max_tokens <= 8192
+    error_message = "llm_max_tokens must be between 64 and 8192."
+  }
+}
+
+variable "max_prompt_chars" {
+  description = "Longest question POST /chat accepts, in characters. Longer ones get HTTP 400."
+  type        = number
+  default     = 4000
+
+  validation {
+    condition     = var.max_prompt_chars >= 1 && var.max_prompt_chars <= 100000
+    error_message = "max_prompt_chars must be between 1 and 100000."
+  }
+}

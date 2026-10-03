@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Post-deploy smoke test: checks the deployed stack behaves as intended. Needs the
 # AWS CLI, curl and python3. Grows with each iteration.
-# It writes a few sample objects under history/ and always removes them on exit.
+# It writes a few sample objects under history/ and asks the LLM one short question
+# (a fraction of a cent); everything it creates is removed on exit.
 set -uo pipefail
 
 cd "$(dirname "$0")/../infra" || exit 1
@@ -44,8 +45,15 @@ echo "API (GET /history):"
 api=$(out api_url)
 echo "  $api"
 samples=()
+chat_prefixes=()
 cleanup() {
   for key in "${samples[@]}"; do aws s3 rm "s3://$bucket/$key" --region "$region" >/dev/null 2>&1; done
+  for prefix in "${chat_prefixes[@]}"; do
+    for key in $(aws s3api list-objects-v2 --bucket "$bucket" --prefix "$prefix" --region "$region" \
+        --query 'Contents[].Key' --output text 2>/dev/null); do
+      [[ "$key" == None ]] || aws s3 rm "s3://$bucket/$key" --region "$region" >/dev/null 2>&1
+    done
+  done
 }
 trap cleanup EXIT
 
@@ -81,16 +89,43 @@ check "CORS preflight allows the page's POST" grep -qi '^access-control-allow-or
 code=$(curl -s -o /dev/null -w '%{http_code}' "$api/no-such-route")
 check "unknown route returns 404 (got $code)" test "$code" = 404
 
-# Proves the function's least-privilege role can write to its Terraform-managed log group.
-log_group="/aws/lambda/${bucket%-data}-history"
-streams=0
-for _ in 1 2 3 4 5 6; do
-  streams=$(aws logs describe-log-streams --log-group-name "$log_group" --region "$region" \
-    --query 'length(logStreams)' --output text 2>/dev/null || echo 0)
-  [[ "$streams" -gt 0 ]] && break
-  sleep 5
+# Proves each function's least-privilege role can write to its Terraform-managed log group.
+echo "API (POST /chat):"
+post() { curl -s -w '\n%{http_code}' -X POST "$api/chat" -H 'Content-Type: application/json' -d "$1"; }
+for bad in 'not json' '{}' '{"prompt": "   "}'; do
+  code=$(post "$bad"); code=${code##*$'\n'}
+  check "rejects $bad with 400 (got $code)" test "$code" = 400
 done
-check "function logs reach $log_group" test "$streams" -gt 0
+
+body=$(post '{"prompt": "Reply with the single word: pong"}')
+code=${body##*$'\n'}; body=${body%$'\n'*}
+check "live LLM answer returns 200 (got $code)" test "$code" = 200
+if [[ "$code" == 200 ]]; then
+  ts=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["timestamp"])' <<<"$body")
+  chat_prefixes+=("history/${ts}_")
+  answer=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["response"][:60])' <<<"$body")
+  echo "        model said: $answer"
+  check "answer has the contract fields" json_check \
+    'set(b) == {"prompt","response","timestamp"} and b["response"].strip()' <<<"$body"
+  check "answer mentions pong" json_check '"pong" in b["response"].lower()' <<<"$body"
+  history=$(curl -s "$api/history")
+  check "new answer appears in GET /history" python3 -c \
+    "import json,sys; b=json.loads(sys.argv[1]); sys.exit(0 if any(i['timestamp']=='$ts' for i in b) else 1)" "$history"
+else
+  echo "        (A 500 here usually means the LLM key is invalid or has no credits; check the chat function's logs.)"
+fi
+
+for fn in history chat; do
+  log_group="/aws/lambda/${bucket%-data}-$fn"
+  streams=0
+  for _ in 1 2 3 4 5 6; do
+    streams=$(aws logs describe-log-streams --log-group-name "$log_group" --region "$region" \
+      --query 'length(logStreams)' --output text 2>/dev/null || echo 0)
+    [[ "$streams" -gt 0 ]] && break
+    sleep 5
+  done
+  check "function logs reach $log_group" test "$streams" -gt 0
+done
 
 echo
 if ((failures)); then echo "$failures check(s) failed."; exit 1; fi

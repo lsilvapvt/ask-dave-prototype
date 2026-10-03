@@ -69,3 +69,28 @@ resource "aws_lambda_permission" "history" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/GET/history"
 }
+
+# POST /chat
+
+resource "aws_apigatewayv2_integration" "chat" {
+  api_id                 = aws_apigatewayv2_api.http.id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = aws_lambda_function.chat.invoke_arn
+  payload_format_version = "2.0"
+  timeout_milliseconds   = 30000 # the HTTP API maximum; the function itself stops at 28 s
+}
+
+resource "aws_apigatewayv2_route" "chat" {
+  #checkov:skip=CKV_AWS_309:The app is public by design; rate limiting comes with API throttling.
+  api_id    = aws_apigatewayv2_api.http.id
+  route_key = "POST /chat"
+  target    = "integrations/${aws_apigatewayv2_integration.chat.id}"
+}
+
+resource "aws_lambda_permission" "chat" {
+  statement_id  = "AllowApiGatewayPostChat"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.chat.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.http.execution_arn}/*/POST/chat"
+}

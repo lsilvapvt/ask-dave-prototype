@@ -9,7 +9,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 1. [x] Tooling and CI skeleton (nothing deployed): providers, variables, `scripts/check.sh`, `.github/workflows/ci.yml`, guard tests
 2. [x] Storage and secret: data bucket, Secrets Manager secret (write-only, `recovery_window_in_days = 0`), default tags, `scripts/smoke-test.sh`, `scripts/verify-destroyed.sh`
 3. [x] `history` Lambda + HTTP API `GET /history` (Terraform-managed log groups, scoped IAM, CORS, access logs, handler unit tests)
-4. [ ] `chat` Lambda + `POST /chat` (needs the LLM provider decision)
+4. [x] `chat` Lambda + `POST /chat` (Anthropic Messages API, default model `claude-haiku-4-5`; live-tested end to end)
 5. [ ] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain
 6. [ ] CloudWatch `Errors` alarms (optional SNS email)
 7. [ ] API throttling, deploy-script polish, fresh-account rehearsal, README write-up
@@ -21,12 +21,12 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [x] S3 history data bucket: `force_destroy`, public access blocked, SSE-S3, ACLs disabled, HTTPS-only policy, `random_id` suffix
 - [ ] S3 frontend bucket (CloudFront iteration)
 - [x] Secrets Manager secret holding `llm_api_key` (write-only value: never in Terraform state)
-- [ ] IAM role + policy for `chat` Lambda (Secrets Manager read on the one secret + S3 `PutObject` on the data bucket/prefix)
+- [x] IAM role + policy for `chat` Lambda (`GetSecretValue` on the one secret, `PutObject` on `history/*`, own log group; verified with the IAM policy simulator)
 - [x] IAM role + policy for `history` Lambda (`ListBucket` limited to `history/`, `GetObject` on `history/*`, writes only its own log group; verified with the IAM policy simulator)
-- [ ] `backend/chat/handler.py` — parse `{"prompt"}`, call LLM via `urllib`, write `{prompt, response, timestamp}` to S3, return it
+- [x] `backend/chat/handler.py` — parse `{"prompt"}`, call LLM via `urllib`, write `{prompt, response, timestamp}` to S3, return it
 - [x] `backend/history/handler.py` — list + fetch recent S3 objects under `history/`, return newest-first (corrupt objects skipped and logged)
-- [ ] Lambda function resources (zip via `archive_file` data source — no external deps, no layer) — `history` done, `chat` next
-- [ ] API Gateway HTTP API with `POST /chat` and `GET /history` routes, Lambda proxy integrations, CORS enabled — `GET /history` done
+- [x] Lambda function resources (zip via `archive_file` data source — no external deps, no layer)
+- [x] API Gateway HTTP API with `POST /chat` and `GET /history` routes, Lambda proxy integrations, CORS enabled
 - [ ] CloudFront distribution + Origin Access Control in front of the frontend bucket
 - [ ] `frontend/config.js.tmpl` rendered via `templatefile()` with the live API Gateway URL, uploaded as `aws_s3_object` (not committed as a static file — deploy-time generated)
 - [ ] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file)
@@ -49,6 +49,10 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [x] GitHub Actions CI: `terraform fmt -check`, `validate`, tflint, Checkov, gitleaks, ruff, pytest, shellcheck (no `plan`: it would need AWS credentials via an out-of-stack IAM role)
 - [ ] Remote Terraform state (S3 backend + DynamoDB lock table)
 - [ ] Basic rate limiting (API Gateway throttling) or simple shared-secret auth header
+
+## Post-v1.0
+
+- [ ] Additional LLM providers: an `llm_provider` variable (`anthropic` | `openai`), per-provider request/response adapters in the `chat` handler with unit tests, a required `llm_model` for non-default providers, and an optional base-URL override for compatible gateways. An endpoint variable alone isn't enough: auth headers, request fields, and response shapes differ per provider.
 
 ## Release checklist
 

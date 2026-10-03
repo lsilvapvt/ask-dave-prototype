@@ -9,7 +9,7 @@ AskDave is a small AI chat tool: ask a question, get an answer from an LLM, and 
 - **Terraform 1.11 or newer.** On macOS: `brew install hashicorp/tap/terraform`.
 - **AWS credentials** for an IAM identity allowed to create the stack's resources, available through the standard credential chain (`aws configure`, `AWS_PROFILE`, or SSO). Avoid root user access keys.
 - **AWS CLI and curl** (optional), used only by the smoke test and the post-destroy leftover check.
-- **An LLM provider API key.** Export it as `TF_VAR_llm_api_key`, or run the deploy script interactively and paste it when asked. To avoid saving it in your shell history:
+- **An Anthropic API key** with credits, from platform.claude.com. Export it as `TF_VAR_llm_api_key`, or run the deploy script interactively and paste it when asked. To avoid saving it in your shell history:
 
   ```bash
   read -rs TF_VAR_llm_api_key && export TF_VAR_llm_api_key
@@ -19,13 +19,15 @@ The key goes straight to AWS Secrets Manager. It is never written to the repo, t
 
 The region defaults to `us-east-1`. Override it with `export TF_VAR_aws_region=<region>`.
 
+The model defaults to Claude Haiku 4.5, the fastest and cheapest current Claude model (roughly a quarter of a cent per typical question). For stronger answers at higher cost, set `export TF_VAR_llm_model=claude-sonnet-5-5` or `claude-opus-5-5` before deploying.
+
 ## Deploy
 
 ```bash
 ./scripts/deploy.sh
 ```
 
-To check the deployed stack afterwards (it adds a few sample history entries and always removes them):
+To check the deployed stack afterwards (it adds a few sample history entries, asks the model one short question for a fraction of a cent, and removes everything it created):
 
 ```bash
 ./scripts/smoke-test.sh

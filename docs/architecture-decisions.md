@@ -1,6 +1,6 @@
 # Architecture decisions and rationale
 
-Why AskDave is built the way it is. This is the source for the README's "decisions and why" section; keep it updated as choices are confirmed or revised.
+Why AskDave is built the way it is: each choice, the alternatives considered, and the trade-offs accepted. The README's "Decisions and why" section is the short version of this document.
 
 ## Compute: two Lambda functions, not ECS / App Runner / EC2
 
@@ -38,9 +38,9 @@ The frontend reads its API base URL from `config.js` sitting next to `index.html
 
 Python is concise for small handlers, and the Lambda runtime ships boto3 for AWS calls. A deliberate simplification: call the LLM's REST API directly via the stdlib `urllib.request` rather than installing the provider's SDK. This avoids any Lambda packaging/dependency/layer step entirely — the deployable artifact is a plain zip of stdlib-only source, which keeps `terraform apply` as the single build-and-deploy action with nothing else required.
 
-## LLM provider: a third-party API (Anthropic or OpenAI), not AWS Bedrock
+## LLM provider: Anthropic's API directly, not Amazon Bedrock
 
-AskDave is bring-your-own-key: whoever deploys it supplies their own LLM API key, which must live in Secrets Manager. Bedrock authenticates via IAM rather than a standalone API key, and requires per-account model access setup, so a direct provider API keeps deployment portable and the secret-handling path explicit. Use a direct provider API (Anthropic Claude Haiku-class, or OpenAI `gpt-4o-mini`-class) with a cheap/fast model — final pick depends on which key is easiest to test against during development.
+AskDave is bring-your-own-key: whoever deploys it supplies their own LLM API key, which must live in Secrets Manager.
 
 **Decision:** the Anthropic Messages API, called directly over HTTPS, with **Claude Haiku 4.5** (`claude-haiku-4-5`) as the default model for cost: $1 / $5 per million input / output tokens, roughly a quarter of a cent per typical question. It is also the fastest current Claude model, which keeps replies well inside API Gateway's ~29-second limit. The model is a Terraform variable (`llm_model`), so a deployment can switch to `claude-sonnet-5-5` or `claude-opus-5-5` for stronger answers without code changes.
 
@@ -66,7 +66,6 @@ This design also frames what breaks first at 1,000 users (see below).
 - **Errors are not swallowed:** if listing fails, the exception propagates. Lambda logs the traceback and counts it in the `Errors` metric the CloudWatch alarm watches, and API Gateway returns 500. Returning a hand-made 500 would hide the failure from that alarm.
 - **Runtime:** Python 3.14 on arm64 (Graviton, about 20% cheaper than x86), 256 MB, 10 s timeout.
 - **No reserved concurrency:** new AWS accounts often have a low concurrency quota, and reserving any can fail the deploy. API Gateway throttling bounds load instead.
-- **CORS** is open to any origin until the frontend exists, then narrowed to the CloudFront domain.
 
 ## Chat endpoint details
 
@@ -76,6 +75,14 @@ This design also frames what breaks first at 1,000 users (see below).
 - **Failures propagate:** like the history endpoint, LLM and S3 failures are not turned into hand-made responses. Lambda counts them in the `Errors` metric the alarm watches, and API Gateway returns 500. A failed LLM call saves nothing.
 - **Secret caching:** the key is fetched from Secrets Manager on first use and cached in the container for five minutes, so most requests skip that call and a rotated key still takes effect within minutes. The key never appears in logs or error messages (covered by a unit test).
 - **Timestamps:** UTC with millisecond precision (`2026-10-03T18:08:50.252Z`). Fixed width keeps object keys sorting chronologically, and three fractional digits parse reliably in every browser.
+
+## Rate limiting: API Gateway throttling
+
+- **Why throttling, not basic auth, for v1.0:** the provided page calls the API on API Gateway's domain and can't be edited, so browsers would never send Basic credentials to the API; auth there needs same-origin routing first (see "another week"). Throttling protects the API itself with a few lines of Terraform.
+- **Limits:** `POST /chat` at 1 request per second sustained, burst 5, because every call is a paid LLM request; other routes at 10 per second, burst 10. Requests over the limit get 429 before reaching Lambda, so they cost nothing and are not errors. All four numbers are variables.
+- **Limits are API-wide, not per client.** HTTP APIs have no per-client usage plans; one heavy user can use up the budget for everyone. That's acceptable for a prototype, where the goal is bounding load and spend.
+- **API Gateway's token bucket is approximate.** In testing, rapid requests got 429s, but more requests got through than the burst value suggests. The smoke test therefore checks for "some 429s, no server errors", not an exact count.
+- **The burst default stays at 10** to match the 10 concurrent Lambda executions new accounts often get; beyond that, Lambda refuses invocations and the API answers 503 (see "What breaks first").
 
 ## IAM / secrets / observability
 
@@ -95,33 +102,46 @@ This design also frames what breaks first at 1,000 users (see below).
 
 ## Deploy / destroy ergonomics
 
-- `scripts/deploy.sh` wraps `terraform init` + `terraform apply -auto-approve`, then prints `terraform output -raw app_url`.
-- `scripts/destroy.sh` wraps `terraform destroy -auto-approve`.
-- S3 buckets are created with `force_destroy = true` — otherwise `terraform destroy` fails on non-empty buckets, violating "destroy should leave nothing behind."
-- CloudFront distribution teardown takes several minutes by design (AWS-side propagation) — document this in the README so it doesn't read as the script hanging.
-- No hardcoded account IDs/names anywhere: `data "aws_caller_identity"` where needed, `random_id`/`random_pet` for globally-unique S3 bucket names, input variables (with defaults) for region/model name/etc. Only the LLM API key is a required, sensitive input with no default.
+- **`scripts/deploy.sh`** checks the Terraform version (1.11+), asks for the key if `TF_VAR_llm_api_key` isn't set, shows the AWS identity and region it is about to deploy into (and warns on root credentials), runs `terraform init` and `terraform apply -auto-approve`, and ends with a summary: app URL, API URL, model, alarms.
+- **`scripts/destroy.sh`** runs `terraform destroy -auto-approve` without needing the real key, then `scripts/verify-destroyed.sh`, which searches the account for anything still tagged for this project (plus IAM roles, untagged log groups, and CloudFront origin access controls by name) and confirms each is really gone.
+- **S3 buckets use `force_destroy = true`.** Otherwise `terraform destroy` fails on a bucket that still holds history.
+- **CloudFront takes minutes both ways** (about 3-5 to deploy, and as long to destroy, because a distribution must be disabled before it can be deleted). The scripts and README say so, so the wait doesn't read as a hang.
+- **Nothing is tied to one account or machine.** Names combine `project_name` with a `random_id` suffix (S3 bucket names are global across all AWS accounts); the region and every other setting is a variable with a safe default; AWS-managed CloudFront policies are looked up by name, not by ID; ARNs always come from resource attributes. Only the LLM API key is required, with no default. Guard tests fail CI on any literal account ID, ARN, region, key, or tfvars file.
 
 ## What breaks first at 1,000 users
 
-- Listing and fetching many small S3 objects synchronously for `/history` gets slow, and the per-request fan-out of `GetObject` calls doesn't scale cleanly — Lambda's default account concurrency ceiling becomes a real constraint under burst load.
-- The LLM call is synchronous end-to-end (frontend waits on Lambda waits on the model). API Gateway's ~29-second integration timeout risks tripping on a slow model response under load.
-- No per-user partitioning, auth, or rate limiting — cost and abuse exposure scale linearly and unbounded with traffic.
+In the order they would hit, with what to change:
+
+1. **Lambda concurrency, in a new AWS account.** New accounts often allow only 10 concurrent Lambda executions across all functions. A chat request holds an execution for the whole LLM call (1-3 seconds), so about ten simultaneous questions saturate it. Beyond that, Lambda refuses invocations and the API answers 503. This was observed in testing: 30 parallel requests produced 503s, and the API 5xx alarm fired. **Change:** request a concurrency increase through Service Quotas (established accounts default to 1,000), then raise the API throttle limits to match.
+2. **The API throttle, by design.** `POST /chat` is limited to 1 request per second sustained (burst 5) for the whole API, not per user, to bound LLM spend. At 1,000 users most questions would get 429 "Too Many Requests". **Change:** raise the limits once concurrency allows, and add per-user limits, which need either user identity (see basic auth in "another week") or an AWS WAF rate-based rule per IP (from about $5/month).
+3. **Anthropic rate limits.** Each Anthropic organization has request and token limits per minute by usage tier. Past them, Anthropic returns 429; the function retries once, then fails, and the alarms fire. **Change:** a higher usage tier, plus queueing (SQS) so bursts wait instead of failing.
+4. **History reads everything.** Every page load lists every key under `history/` (S3 lists 1,000 keys per call, ascending only) before fetching the newest 50, so `GET /history` gets slower and costlier with every question ever asked. And everyone sees everyone's questions. **Change:** DynamoDB with a timestamp sort key for paginated newest-first queries, keeping S3 only if raw archives are wanted, and per-session history (see "another week").
+5. **Cost exposure without auth.** Throttling caps the rate, not the bill: 1 request per second is about 86,000 Haiku calls a day, roughly $200 a day at worst. **Change:** an Anthropic workspace spend limit is the real cap and should always be set; per-user auth and limits after that.
+6. **Synchronous LLM calls.** The browser waits on API Gateway, which waits on Lambda, which waits on the model, all inside API Gateway's 30-second limit. Haiku answers in 1-3 seconds, but larger models or long answers under load could hit it. **Change:** stream the answer (Lambda response streaming behind CloudFront, or WebSockets) or move to an async job pattern.
 
 ## What to do with another week
 
-- Move history *metadata* into DynamoDB (sorted by a timestamp sort key, paginated), keeping S3 purely as blob/audit storage if still needed — removes the listing/race-condition concerns above.
-- Move to an async pattern (e.g., SQS + worker, or WebSocket/SSE streaming) so slow LLM responses don't risk the API Gateway timeout and the UI can show streaming output.
-- Add basic auth or API-key-based rate limiting.
 - **Conversation memory per browser session.** Today each question is answered on its own: the chat function sends the LLM only the current prompt, so "My name is John" followed by "What is my name?" gets no recall. The provided page sends only `{"prompt"}`, with no session ID, so the fix can't come from the page. Instead: serve `/chat` and `/history` through the CloudFront distribution (API Gateway as a second origin, caching disabled), and point `config.js` at the app's own URL. Requests become same-origin, so the browser sends cookies with no page change, and CORS goes away. The chat function sets a random, `HttpOnly`, `Secure`, `SameSite=Strict` session cookie on a visitor's first message and saves entries under `history/<session-id>/<timestamp>_<uuid>.json`. Before each LLM call it lists only that session's prefix and sends the last ~10 exchanges as prior turns, which stays cheap however large the bucket grows. The history endpoint sorts by the timestamp in the file name, so newest-first still works. Trade-offs: the chat role needs read access to `history/` (no longer write-only), each call sends more input tokens, and the page must decide whether to show everyone's history or only the visitor's own. Shared global memory and IP-based sessions were rejected: the first leaks one visitor's context to another, and the second merges users behind one network and splits a phone that changes networks.
-- A separate bootstrap stack for remote state (S3 backend with native locking) and an OIDC role so CI can run `terraform plan` on pull requests.
+- **Basic authentication, protecting both the page and the API.** v1.0 limits abuse with API Gateway throttling instead. Auth would come in two steps:
+  1. **Gate the site:** a CloudFront Function (viewer request, about $0.10 per million requests) checks the `Authorization: Basic` header against a SHA-256 hash that Terraform builds from the configured credentials, so the function code never holds the password. A missing or wrong credential gets a 401 with `WWW-Authenticate: Basic`, which makes the browser show its login box and remember the credentials. Off by default, or with a Terraform-generated `random_password` that `deploy.sh` prints next to the app URL, so a deploy still needs no manual step.
+  2. **Gate the API too:** on its own, step 1 only protects the page and `config.js`. The provided page calls API Gateway on a different domain, and browsers don't send remembered Basic credentials across domains, so anyone who learns the API URL could still call it. The fix is the same-origin routing described in the conversation-memory item: CloudFront serves `/chat` and `/history`, `config.js` points the page at its own URL, and the browser sends the credentials automatically. CloudFront then adds a secret origin header on its way to API Gateway, and the functions reject requests without it, so the direct API Gateway URL can't bypass the login.
+
+  Building it together with conversation memory makes sense, because both need the same routing change.
+- **DynamoDB for history:** a timestamp sort key gives paginated newest-first queries instead of listing every S3 key on each page load. S3 can stay as a raw archive if wanted.
+- **Streaming or async answers** (Lambda response streaming, WebSockets, or SQS with a worker), so slow LLM responses never hit API Gateway's 30-second limit and the page can show text as it arrives.
+- **Remote state and a CI `terraform plan`:** an S3 state backend (with native locking) and an OIDC role for GitHub Actions, in a small separate bootstrap stack, because both must outlive `terraform destroy` of the app.
+- **More LLM providers** (for example, OpenAI): an `llm_provider` variable, per-provider request and response adapters with unit tests, and a required `llm_model` for non-default providers. An endpoint variable alone isn't enough, because auth headers, request fields, and response shapes all differ.
 
 ## CI and Terraform state: static checks only, local state
 
 - **CI runs static checks only** (fmt, validate, tflint, Checkov, gitleaks, ruff, pytest, shellcheck). A `terraform plan` job needs AWS credentials, which means an OIDC IAM role created outside this stack. That role would survive `destroy` and add a setup step for anyone deploying.
 - **State stays local.** A remote S3 backend needs a state bucket this stack cannot destroy itself, which conflicts with "destroy leaves nothing behind". Both are deliberate trade-offs for a single-operator, clone-and-run prototype; a team setup would add a separate bootstrap stack for both.
-- **Guard tests enforce the destroy rule ahead of time.** They match nothing in iteration 1 and hold each later iteration to it automatically.
+- **Guard tests encode the project's rules.** They read the Terraform and the repo and fail CI if a change breaks one: a bucket without `force_destroy`, a secret with a recovery window, a Lambda without its own role, log group, or alarm, a wildcard IAM resource, the LLM key flowing anywhere but the write-only secret, an edited `index.html`, and more.
 - **Supply chain:** GitHub Actions are pinned to commit SHAs, tool versions are pinned, the gitleaks binary is checksum-verified, and `.terraform.lock.hcl` is committed so provider builds are verified by hash.
+- **Dependency audit (`pip-audit`):** the deployed functions have no third-party dependencies, and the test tools have no known vulnerabilities. Checkov 3.3.22, the latest release, pulls in `asteval` 1.0.6 (fixed in 1.0.9, but checkov's own version constraint rejects the fix) and `ecdsa` 0.19.2 (no fix released). Accepted for now: checkov runs only in CI and on developer machines, never in the deployed app, and CI uses the `pull_request` trigger with a read-only token and no secrets, so even a malicious pull request exploiting them could reach nothing sensitive. Upgrade checkov when a release accepts the fixed versions.
 
-## Optional extras (only after the core works)
+## Optional extras
 
-Priority order: (1) GitHub Actions CI with static checks (done), (2) API Gateway throttling as the simplest rate limit, (3) remote state, which is deliberately deferred (see above).
+- **CI via GitHub Actions:** included (static checks; see above).
+- **Rate limiting:** included, as API Gateway throttling, chosen over basic auth because the page can't send credentials to the API's domain (see "Rate limiting").
+- **Remote Terraform state:** deliberately deferred (see above).

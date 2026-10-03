@@ -151,6 +151,14 @@ def test_accepts_a_base64_encoded_body(chat, monkeypatch):
 # Bad requests: answered with 400, nothing called, nothing saved
 
 
+def test_rejects_invalid_base64_with_400(chat, monkeypatch):
+    module, fake_s3, _ = chat
+    http = use_http(monkeypatch, module)
+    result = module.handler({"body": "not base64!", "isBase64Encoded": True}, Context())
+    assert result["statusCode"] == 400
+    assert not http.requests and not fake_s3.objects
+
+
 @pytest.mark.parametrize(
     "body",
     ["not json", "[]", "{}", '{"prompt": 42}', '{"prompt": "   "}', '{"prompt": null}', ""],

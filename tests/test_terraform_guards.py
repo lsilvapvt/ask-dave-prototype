@@ -1,8 +1,10 @@
 """Structural guards on the Terraform code.
 
-Several of these match nothing until the resources they govern exist. They are in
-place from iteration 1 so each later iteration is held to the rules automatically:
-everything Terraform creates, Terraform must be able to fully destroy.
+Each test reads the Terraform source and fails if a change breaks one of the
+project's rules: everything Terraform creates must be fully destroyable, each
+function gets least-privilege access, the LLM key never leaves Secrets Manager, and
+the app is served only over HTTPS. Tests whose resources don't exist pass trivially,
+so the rules also apply to anything added later.
 """
 
 import re
@@ -208,4 +210,15 @@ def test_email_notifications_are_optional():
     for name, body in blocks(TF, "resource", "aws_sns_topic_subscription").items():
         assert re.search(r"count\s*=\s*local\.notify", body), (
             f"aws_sns_topic_subscription.{name} must only exist when alarm_email is set"
+        )
+
+
+def test_api_is_rate_limited():
+    stages = blocks(TF, "resource", "aws_apigatewayv2_stage")
+    for name, body in stages.items():
+        assert "default_route_settings" in body and "throttling_rate_limit" in body, (
+            f"aws_apigatewayv2_stage.{name} needs throttling so traffic and LLM spend are bounded"
+        )
+        assert re.search(r"route_key\s*=\s*aws_apigatewayv2_route\.chat\.route_key", body), (
+            "POST /chat needs its own, stricter limit: every call is a paid LLM request"
         )

@@ -24,11 +24,12 @@ Someone deploying this follows only the README, in an account this repo has neve
 
 - **IaC:** Terraform. One command to apply, one to destroy. Region, account, and globally unique names are all parameterized or generated.
 - **Backend:** two small Python Lambda functions, `chat` and `history`, each with its **own** least-privilege IAM role, behind a single **API Gateway HTTP API**.
-- **LLM:** a third-party LLM API (Anthropic or OpenAI) called with Python's stdlib `urllib.request`: no SDK, no Lambda layer, no packaging step. The bring-your-own API key lives in **Secrets Manager**; the Lambda environment holds only the **secret's ARN**, never the key.
+- **LLM:** Anthropic's Messages API (default model `claude-haiku-4-5`, set by the `llm_model` variable) called with Python's stdlib `urllib.request`: no SDK, no Lambda layer, no packaging step. The bring-your-own API key lives in **Secrets Manager**; the Lambda environment holds only the **secret's ARN**, never the key.
 - **Storage:** S3, **one JSON object per Q&A** (key pattern `history/<ISO-8601-timestamp>_<uuid>.json`), deliberately not a single shared file, to avoid a read-modify-write race. Lexicographic key order gives newest-first for free.
 - **Frontend:** the provided `frontend/index.html` is served **unmodified** from a private S3 bucket behind **CloudFront** with Origin Access Control. That gives HTTPS on a `*.cloudfront.net` domain with no certificate or DNS setup.
 - **`config.js`** is rendered by Terraform (`templatefile()`) with the live API Gateway URL and uploaded as an `aws_s3_object` during `apply`, so the app works right after deploy.
-- **Observability:** Lambda logs to Terraform-managed CloudWatch log groups; a CloudWatch alarm watches the Lambda `Errors` metric.
+- **Observability:** each function and the API log to their own Terraform-managed CloudWatch log groups; three alarms fire on errors (one per function's `Errors` metric, one on the API's `5xx`), with optional SNS email.
+- **Rate limiting:** API Gateway throttling, stricter on `POST /chat` because each call is a paid LLM request.
 - **Deploy/destroy:** `scripts/deploy.sh` and `scripts/destroy.sh` wrap `terraform apply/destroy -auto-approve`. `deploy.sh` prints the app URL at the end. CloudFront teardown takes several minutes; that is expected, not a hang.
 
 ## Repo layout
@@ -37,7 +38,7 @@ Someone deploying this follows only the README, in an account this repo has neve
 askdave-prototype/
 ├── CLAUDE.md                          # this file
 ├── README.md                          # user-facing docs: deploy, destroy, architecture, decisions
-├── TODO.md                            # iteration plan and implementation checklist
+├── TODO.md                            # roadmap after v1.0
 ├── docs/
 │   ├── requirements.md                # what AskDave must do
 │   └── architecture-decisions.md      # rationale behind every design choice
@@ -47,25 +48,27 @@ askdave-prototype/
 ├── backend/
 │   ├── chat/handler.py                # POST /chat: calls the LLM, writes to S3, returns {prompt, response, timestamp}
 │   └── history/handler.py             # GET /history: lists and returns S3 objects, newest first
-├── infra/                             # Terraform, one file per concern: main.tf (naming), storage.tf, secrets.tf, iam.tf, lambda.tf, api.tf, cloudfront.tf
+├── infra/                             # Terraform, one file per concern: main.tf (naming), storage.tf, secrets.tf, iam.tf, lambda.tf, api.tf, cloudfront.tf, alarms.tf
 ├── scripts/
 │   ├── deploy.sh / destroy.sh
 │   ├── smoke-test.sh                  # post-deploy checks against the live stack
+│   ├── test-alarm.sh                  # injects one real error and waits for the alarm
 │   ├── verify-destroyed.sh            # post-destroy leftover check (run by destroy.sh)
 │   ├── setup-dev.sh                   # local dev tooling (venvs)
 │   └── check.sh                       # local run of the CI static checks
 ├── tests/                             # pytest: guard tests (constraints, destroy rules, least privilege) + handler unit tests
+├── images/                            # README screenshot
 └── .github/workflows/ci.yml           # static checks only, no AWS credentials
 ```
 
 ## Hard constraints — do not violate these
 
 1. **Never edit `frontend/index.html`.** It is a fixed, provided asset (a guard test checks its hash). Only `config.js` is generated at deploy time.
-2. **No hardcoded AWS account IDs, resource names, or ARNs anywhere.** It must deploy cleanly into a *different* AWS account, with *different* credentials and a *different* LLM API key. Use `data "aws_caller_identity"`, `random_id`/`random_pet` for globally unique names, and input variables with safe defaults for everything else.
+2. **No hardcoded AWS account IDs, resource names, or ARNs anywhere.** It must deploy cleanly into a *different* AWS account, with *different* credentials and a *different* LLM API key. Use `random_id` for globally unique names, resource attributes for ARNs, and input variables with safe defaults for everything else.
 3. **The LLM API key must never appear** in the repo, in a plain Lambda environment variable, or anywhere outside Secrets Manager. It is supplied at deploy time via `TF_VAR_llm_api_key`, as an `ephemeral` variable feeding the write-only `secret_string_wo`, so it never reaches Terraform state either.
 4. **Every AWS resource comes from Terraform, and `terraform destroy` must leave nothing behind.** S3 buckets need `force_destroy`, secrets need `recovery_window_in_days = 0`, and Lambda log groups must be Terraform-managed.
 5. **Keep the Lambda dependency footprint at zero** (stdlib, plus the boto3 the Lambda runtime already provides). No build step, layer, or Docker packaging.
 
-## Current status / next steps
+## Next steps
 
-See `TODO.md` for the iteration plan and current progress.
+See `TODO.md` for the roadmap after v1.0.

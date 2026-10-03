@@ -1,6 +1,6 @@
 # Every default here must be safe to deploy as-is into a fresh AWS account.
-# Inputs are added in the iteration that first uses them (llm_api_key and the model
-# settings arrive with the Secrets Manager and chat iterations).
+# Only llm_api_key is required. Set any variable with TF_VAR_<name>; see README
+# "Configuration".
 
 variable "aws_region" {
   description = "AWS region to deploy into."
@@ -106,4 +106,31 @@ variable "alarm_email" {
     condition     = var.alarm_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alarm_email))
     error_message = "alarm_email must be empty or a valid email address."
   }
+}
+
+# API throttling (token bucket). These limits apply to the whole API, not per client:
+# they cap load and LLM spend, and excess requests get HTTP 429.
+
+variable "api_rate_limit" {
+  description = "Sustained requests per second allowed on routes without their own limit (GET /history)."
+  type        = number
+  default     = 10
+}
+
+variable "api_burst_limit" {
+  description = "Short burst of requests allowed above api_rate_limit. Kept at 10 because new AWS accounts often allow only 10 concurrent Lambda executions; beyond that Lambda refuses invocations and the API answers 503."
+  type        = number
+  default     = 10
+}
+
+variable "chat_rate_limit" {
+  description = "Sustained POST /chat requests per second. Each one is a paid LLM call."
+  type        = number
+  default     = 1
+}
+
+variable "chat_burst_limit" {
+  description = "Short burst of POST /chat requests allowed above chat_rate_limit."
+  type        = number
+  default     = 5
 }

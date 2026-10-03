@@ -73,11 +73,11 @@ def response(status: int, body: dict) -> dict:
 
 def parse_prompt(event: dict) -> str:
     body = event.get("body") or ""
-    if event.get("isBase64Encoded"):
-        body = base64.b64decode(body).decode("utf-8", errors="replace")
     try:
+        if event.get("isBase64Encoded"):
+            body = base64.b64decode(body, validate=True).decode("utf-8", errors="replace")
         payload = json.loads(body)
-    except ValueError:
+    except ValueError:  # covers invalid base64 (binascii.Error) and invalid JSON
         raise BadRequest('Request body must be JSON like {"prompt": "..."}.') from None
 
     prompt = payload.get("prompt") if isinstance(payload, dict) else None

@@ -29,6 +29,20 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default"
   auto_deploy = true
 
+  # Rate limiting: a token bucket per route, shared by all callers. Requests over
+  # the limit get 429 before reaching Lambda, so they cost nothing and never count
+  # as errors. POST /chat is stricter because every call is a paid LLM request.
+  default_route_settings {
+    throttling_rate_limit  = var.api_rate_limit
+    throttling_burst_limit = var.api_burst_limit
+  }
+
+  route_settings {
+    route_key              = aws_apigatewayv2_route.chat.route_key
+    throttling_rate_limit  = var.chat_rate_limit
+    throttling_burst_limit = var.chat_burst_limit
+  }
+
   # One JSON line per request: who called what, the status, and how long it took.
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api_access.arn

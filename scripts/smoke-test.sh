@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Post-deploy smoke test: checks the deployed stack behaves as intended. Needs the
-# AWS CLI, curl and python3. Grows with each iteration.
+# AWS CLI, curl and python3.
 # It writes a few sample objects under history/ and asks the LLM one short question
 # (a fraction of a cent); everything it creates is removed on exit.
 set -uo pipefail
@@ -36,7 +36,10 @@ check "secret exists with a current value" test "$(aws secretsmanager describe-s
   --query 'length(VersionIdsToStages.*[] | [?@ == `AWSCURRENT`])' --output text)" = 1
 if [[ -n "${TF_VAR_llm_api_key:-}" ]]; then
   # The key is ephemeral and write-only: it must never appear in Terraform state.
-  if terraform state pull | grep -qF -- "$TF_VAR_llm_api_key"; then
+  # Python reads the key from the environment: passing it to grep as an argument
+  # would expose it to other local processes through the process list.
+  if terraform state pull | python3 -c \
+      'import os, sys; sys.exit(0 if os.environ["TF_VAR_llm_api_key"] in sys.stdin.read() else 1)'; then
     fail "key absent from Terraform state"
   else
     pass "key absent from Terraform state"
@@ -146,6 +149,19 @@ for fn in history chat; do
   done
   check "function logs reach $log_group" test "$streams" -gt 0
 done
+
+echo "Rate limiting:"
+# 40 rapid sequential POST /chat requests with an invalid body. Sequential keeps
+# Lambda at one invocation at a time, so this measures API Gateway's throttle rather
+# than the account's Lambda concurrency limit (which answers 503, not 429). The
+# throttle runs before Lambda, so no LLM call is made. API Gateway's token bucket is
+# approximate, so the check is "some 429s", not an exact count.
+codes=$(for _ in $(seq 40); do
+  curl -s -o /dev/null -w '%{http_code}\n' -X POST "$api/chat" -H 'Content-Type: application/json' -d '{}'
+done | sort | uniq -c | tr -s ' ' | tr '\n' ';')
+echo "        status counts:$codes"
+check "rapid POST /chat requests are throttled (429)" grep -q ' 429' <<<"$codes"
+check "throttling causes no server errors" absent grep -q ' 5[0-9][0-9]' <<<"$codes"
 
 echo "Alarms:"
 for alarm in $(terraform output -json alarm_names | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do

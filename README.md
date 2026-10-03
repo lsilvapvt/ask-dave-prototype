@@ -35,6 +35,18 @@ To check the deployed stack afterwards (it adds a few sample history entries, as
 ./scripts/smoke-test.sh
 ```
 
+To prove the error alarm works, inject one real error and wait for the alarm to fire (1-3 minutes; nothing is written and the LLM is not called):
+
+```bash
+./scripts/test-alarm.sh
+```
+
+To get alarm emails, set an address before deploying. AWS then emails a confirmation link that must be clicked once:
+
+```bash
+export TF_VAR_alarm_email=you@example.com
+```
+
 To change the LLM key later, export the new key and bump its version so Terraform pushes it:
 
 ```bash

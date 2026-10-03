@@ -47,6 +47,15 @@ for arn in $arns; do
       if aws apigatewayv2 get-api --api-id "${arn##*/apis/}" --region "$region" >/dev/null 2>&1; then
         echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
       fi ;;
+    arn:*:cloudwatch:*:alarm:*)
+      if [[ "$(aws cloudwatch describe-alarms --alarm-names "${arn##*:alarm:}" --region "$region" \
+          --query 'length(MetricAlarms)' --output text)" != 0 ]]; then
+        echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
+      fi ;;
+    arn:*:sns:*)
+      if aws sns get-topic-attributes --topic-arn "$arn" --region "$region" >/dev/null 2>&1; then
+        echo "  LEFT  $arn"; leftovers=$((leftovers + 1))
+      fi ;;
     arn:*:cloudfront::*:distribution/*)
       if aws cloudfront get-distribution --id "${arn##*/}" >/dev/null 2>&1; then
         echo "  LEFT  $arn"; leftovers=$((leftovers + 1))

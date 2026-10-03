@@ -1,5 +1,5 @@
 # Shared naming. Resources live in purpose-named files: storage.tf, secrets.tf, and
-# iam.tf, lambda.tf, api.tf, cloudfront.tf and (next iteration) alarms.tf.
+# iam.tf, lambda.tf, api.tf, cloudfront.tf, alarms.tf.
 
 # Random suffix for names that must be unique: S3 bucket names are global across
 # all AWS accounts, and the suffix also lets two copies of this stack coexist in

@@ -183,3 +183,29 @@ def test_cors_is_not_open_to_every_origin_once_the_frontend_exists():
     assert not re.search(r'allow_origins\s*=\s*\[\s*"\*"', TF), (
         "with the frontend deployed, CORS must allow only the CloudFront origin"
     )
+
+
+def test_every_lambda_has_an_errors_alarm():
+    lambdas = set(blocks(TF, "resource", "aws_lambda_function"))
+    if not lambdas:
+        return
+    alarmed = TF.split("alarmed_lambdas = {", 1)[-1].split("}", 1)[0]
+    covered = set(re.findall(r"aws_lambda_function\.(\w+)\.function_name", alarmed))
+    assert lambdas <= covered, f"Lambdas without an errors alarm: {sorted(lambdas - covered)}"
+
+
+def test_alarms_treat_no_traffic_as_healthy():
+    # An idle app has no metric data; that must not read as an alarm or as unknown.
+    for name, body in blocks(TF, "resource", "aws_cloudwatch_metric_alarm").items():
+        assert re.search(r'treat_missing_data\s*=\s*"notBreaching"', body), (
+            f"aws_cloudwatch_metric_alarm.{name} needs treat_missing_data = notBreaching"
+        )
+
+
+def test_email_notifications_are_optional():
+    # An email subscription needs a manual confirmation click, so it must never be
+    # created unless the deployer asked for it.
+    for name, body in blocks(TF, "resource", "aws_sns_topic_subscription").items():
+        assert re.search(r"count\s*=\s*local\.notify", body), (
+            f"aws_sns_topic_subscription.{name} must only exist when alarm_email is set"
+        )

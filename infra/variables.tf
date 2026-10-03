@@ -96,3 +96,14 @@ variable "max_prompt_chars" {
     error_message = "max_prompt_chars must be between 1 and 100000."
   }
 }
+
+variable "alarm_email" {
+  description = "Optional email address for alarm notifications. Empty (the default) means alarms still trigger and show in CloudWatch, but nobody is emailed. When set, AWS sends a confirmation email that must be accepted before notifications arrive."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alarm_email == "" || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.alarm_email))
+    error_message = "alarm_email must be empty or a valid email address."
+  }
+}

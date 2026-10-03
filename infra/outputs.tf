@@ -34,3 +34,13 @@ output "cloudfront_distribution_id" {
   description = "CloudFront distribution serving the frontend."
   value       = aws_cloudfront_distribution.frontend.id
 }
+
+output "alarm_names" {
+  description = "CloudWatch alarms that fire on backend errors."
+  value       = concat([for a in aws_cloudwatch_metric_alarm.lambda_errors : a.alarm_name], [aws_cloudwatch_metric_alarm.api_5xx.alarm_name])
+}
+
+output "alarm_topic_arn" {
+  description = "SNS topic that emails alarm notifications, or null when alarm_email is not set."
+  value       = local.notify ? aws_sns_topic.alarms[0].arn : null
+}

@@ -11,7 +11,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 3. [x] `history` Lambda + HTTP API `GET /history` (Terraform-managed log groups, scoped IAM, CORS, access logs, handler unit tests)
 4. [x] `chat` Lambda + `POST /chat` (Anthropic Messages API, default model `claude-haiku-4-5`; live-tested end to end)
 5. [x] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain; verified in headless Chrome
-6. [ ] CloudWatch `Errors` alarms (optional SNS email)
+6. [x] CloudWatch alarms: `Errors` per Lambda + API 5xx, optional SNS email; real fault injected and alarm seen firing
 7. [ ] API throttling, deploy-script polish, fresh-account rehearsal, README write-up
 
 ## Core build
@@ -30,7 +30,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [x] CloudFront distribution + Origin Access Control in front of the frontend bucket
 - [x] `frontend/config.js.tmpl` rendered via `templatefile()` with the live API Gateway URL, uploaded as `aws_s3_object` (not committed as a static file — deploy-time generated)
 - [x] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file; smoke test compares checksums)
-- [ ] CloudWatch alarm on the `chat`/`history` Lambdas' `Errors` metric
+- [x] CloudWatch alarm on the `chat`/`history` Lambdas' `Errors` metric (plus API Gateway 5xx)
 - [x] `infra/outputs.tf` — `app_url` (CloudFront domain), API Gateway URL (for debugging)
 - [x] `scripts/deploy.sh` — prompts for the key if unset, `init` + `apply`, prints `app_url` once it exists
 - [x] `scripts/destroy.sh` — destroys without needing the real key, then runs `verify-destroyed.sh`

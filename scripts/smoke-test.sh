@@ -147,6 +147,14 @@ for fn in history chat; do
   check "function logs reach $log_group" test "$streams" -gt 0
 done
 
+echo "Alarms:"
+for alarm in $(terraform output -json alarm_names | python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)))'); do
+  state=$(aws cloudwatch describe-alarms --alarm-names "$alarm" --region "$region" \
+    --query 'MetricAlarms[0].StateValue' --output text 2>/dev/null)
+  # INSUFFICIENT_DATA is normal right after a deploy, before the first evaluation.
+  check "$alarm exists and is not firing ($state)" test "$state" = OK -o "$state" = INSUFFICIENT_DATA
+done
+
 echo
 if ((failures)); then echo "$failures check(s) failed."; exit 1; fi
 echo "All smoke checks passed."

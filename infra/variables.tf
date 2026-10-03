@@ -25,3 +25,24 @@ variable "project_name" {
     error_message = "project_name must be 3-20 characters of lowercase letters, digits and hyphens, starting with a letter."
   }
 }
+
+variable "llm_api_key" {
+  description = "LLM provider API key. Required, no default. Supply via the TF_VAR_llm_api_key environment variable; never commit it."
+  type        = string
+  sensitive   = true
+  # Ephemeral: Terraform never writes this value to state or plan files. It only
+  # reaches the write-only secret_string_wo argument in secrets.tf.
+  ephemeral = true
+  nullable  = false
+
+  validation {
+    condition     = length(trimspace(var.llm_api_key)) > 0
+    error_message = "llm_api_key must not be empty. Export TF_VAR_llm_api_key before deploying."
+  }
+}
+
+variable "llm_api_key_version" {
+  description = "Increment to push a new llm_api_key value to Secrets Manager. Write-only values are not stored in state, so Terraform cannot detect a changed key by itself."
+  type        = number
+  default     = 1
+}

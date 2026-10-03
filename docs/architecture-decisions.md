@@ -50,6 +50,10 @@ This design also frames what breaks first at 1,000 users (see below).
 ## IAM / secrets / observability
 
 - LLM API key lives in **Secrets Manager**. The Lambda environment variable holds only the **secret's ARN**, never the key value — satisfies "not in plain environment variables" literally, not just in spirit.
+- **The key never touches Terraform state either.** A plain `secret_string` argument would store the key in `terraform.tfstate` in clear text. Instead the input variable is `ephemeral` and the secret version uses the write-only `secret_string_wo` argument (Terraform 1.11+), so the value goes to AWS and nowhere else. The trade-off: Terraform can't detect a changed key on its own, so rotating it means bumping `llm_api_key_version`.
+- **Secrets are deleted immediately on destroy** (`recovery_window_in_days = 0`). The default 7-30 day recovery window would leave the secret "pending deletion" after destroy and block reusing its name.
+- **Destroy doesn't need the key.** Terraform requires every variable without a default even for destroy, so `destroy.sh` supplies a dummy value.
+- **Encryption uses AWS-managed keys** (SSE-S3, and the default Secrets Manager key). A customer-managed KMS key costs about $1/month even when idle. Checkov suppressions name each accepted finding inline with its reason.
 - IAM policies scope `s3:GetObject`/`PutObject`/`ListBucket` to the specific bucket/prefix only, and `secretsmanager:GetSecretValue` to the one specific secret ARN only — no wildcard resources.
 - Lambda logs to CloudWatch automatically (default execution role includes `logs:CreateLogGroup/CreateLogStream/PutLogEvents`, scoped to the function's own log group).
 - A CloudWatch alarm watches the Lambda `Errors` metric. (Optional: an SNS topic for notification; the requirement is only an alarm that triggers.)

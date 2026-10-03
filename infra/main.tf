@@ -1,2 +1,13 @@
-# Resources are added iteration by iteration (see TODO.md "Iteration plan").
-# Iteration 1 (tooling and CI) deploys nothing to AWS on purpose.
+# Shared naming. Resources live in purpose-named files: storage.tf, secrets.tf, and
+# (in later iterations) iam.tf, lambda.tf, api.tf, cloudfront.tf, alarms.tf.
+
+# Random suffix for names that must be unique: S3 bucket names are global across
+# all AWS accounts, and the suffix also lets two copies of this stack coexist in
+# one account. It is stored in state, so names are stable across applies.
+resource "random_id" "suffix" {
+  byte_length = 4
+}
+
+locals {
+  name = "${var.project_name}-${random_id.suffix.hex}"
+}

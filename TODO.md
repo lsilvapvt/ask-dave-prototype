@@ -7,7 +7,7 @@ Keep "working and simple" ahead of "complete" — the core loop (deploy → chat
 Each iteration deploys a working slice, is verified with a scripted check, then destroyed cleanly before the next one. All AWS resources come from Terraform only; each iteration adds matching CI static checks.
 
 1. [x] Tooling and CI skeleton (nothing deployed): providers, variables, `scripts/check.sh`, `.github/workflows/ci.yml`, guard tests
-2. [ ] Storage and secret: data bucket, Secrets Manager secret (`recovery_window_in_days = 0`), default tags, `scripts/verify-destroyed.sh`
+2. [x] Storage and secret: data bucket, Secrets Manager secret (write-only, `recovery_window_in_days = 0`), default tags, `scripts/smoke-test.sh`, `scripts/verify-destroyed.sh`
 3. [ ] `history` Lambda + HTTP API `GET /history` (Terraform-managed log group, scoped IAM, CORS)
 4. [ ] `chat` Lambda + `POST /chat` (needs the LLM provider decision)
 5. [ ] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain
@@ -17,9 +17,10 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 ## Core build
 
 - [x] `infra/providers.tf` — AWS provider, required Terraform version, local state (remote state deliberately not used, see architecture-decisions.md)
-- [ ] `infra/variables.tf` — region (default `us-east-1` or similar), `llm_api_key` (sensitive, no default), model name/provider config, project/name prefix
-- [ ] S3 buckets: one for history data, one for frontend static assets — both with `force_destroy = true`, globally-unique names via `random_id`/`random_pet`
-- [ ] Secrets Manager secret holding `llm_api_key`
+- [x] `infra/variables.tf` — region, project prefix, `llm_api_key` (sensitive, ephemeral, no default), `llm_api_key_version` (model/provider config arrives with the chat iteration)
+- [x] S3 history data bucket: `force_destroy`, public access blocked, SSE-S3, ACLs disabled, HTTPS-only policy, `random_id` suffix
+- [ ] S3 frontend bucket (CloudFront iteration)
+- [x] Secrets Manager secret holding `llm_api_key` (write-only value: never in Terraform state)
 - [ ] IAM role + policy for `chat` Lambda (Secrets Manager read on the one secret + S3 `PutObject` on the data bucket/prefix)
 - [ ] IAM role + policy for `history` Lambda (S3 `GetObject`/`ListBucket` on the data bucket/prefix only)
 - [ ] `backend/chat/handler.py` — parse `{"prompt"}`, call LLM via `urllib`, write `{prompt, response, timestamp}` to S3, return it
@@ -31,8 +32,8 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [ ] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file)
 - [ ] CloudWatch alarm on the `chat`/`history` Lambdas' `Errors` metric
 - [ ] `infra/outputs.tf` — `app_url` (CloudFront domain), API Gateway URL (for debugging)
-- [ ] `scripts/deploy.sh` — `terraform init && terraform apply -auto-approve && terraform output -raw app_url`
-- [ ] `scripts/destroy.sh` — `terraform destroy -auto-approve`
+- [x] `scripts/deploy.sh` — prompts for the key if unset, `init` + `apply`, prints `app_url` once it exists
+- [x] `scripts/destroy.sh` — destroys without needing the real key, then runs `verify-destroyed.sh`
 - [ ] End-to-end test: run `deploy.sh` fresh, confirm chat works and history loads with zero manual steps, then run `destroy.sh` and confirm nothing is left in the AWS account
 
 ## README

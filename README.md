@@ -6,7 +6,18 @@ AskDave is a small AI chat tool: ask a question, get an answer from an LLM, and 
 
 ## Prerequisites
 
-_TODO: AWS CLI configured with credentials, Terraform version, how to supply the LLM API key._
+- **Terraform 1.11 or newer.** On macOS: `brew install hashicorp/tap/terraform`.
+- **AWS credentials** for an IAM identity allowed to create the stack's resources, available through the standard credential chain (`aws configure`, `AWS_PROFILE`, or SSO). Avoid root user access keys.
+- **AWS CLI and curl** (optional), used only by the smoke test and the post-destroy leftover check.
+- **An LLM provider API key.** Export it as `TF_VAR_llm_api_key`, or run the deploy script interactively and paste it when asked. To avoid saving it in your shell history:
+
+  ```bash
+  read -rs TF_VAR_llm_api_key && export TF_VAR_llm_api_key
+  ```
+
+The key goes straight to AWS Secrets Manager. It is never written to the repo, to Terraform state or plan files, or to a Lambda environment variable.
+
+The region defaults to `us-east-1`. Override it with `export TF_VAR_aws_region=<region>`.
 
 ## Deploy
 
@@ -14,7 +25,18 @@ _TODO: AWS CLI configured with credentials, Terraform version, how to supply the
 ./scripts/deploy.sh
 ```
 
-_TODO: confirm this is the complete, true one-command deploy once implemented._
+To check the deployed stack afterwards:
+
+```bash
+./scripts/smoke-test.sh
+```
+
+To change the LLM key later, export the new key and bump its version so Terraform pushes it:
+
+```bash
+export TF_VAR_llm_api_key_version=2
+./scripts/deploy.sh
+```
 
 ## Destroy
 
@@ -22,7 +44,7 @@ _TODO: confirm this is the complete, true one-command deploy once implemented._
 ./scripts/destroy.sh
 ```
 
-Destroy is designed to leave nothing behind (S3 buckets use `force_destroy`). CloudFront teardown takes a few extra minutes — that's expected, not a hang.
+Destroy doesn't need the LLM key. It leaves nothing behind: S3 buckets use `force_destroy`, and the secret is deleted immediately rather than scheduled for deletion. Afterwards the script runs `scripts/verify-destroyed.sh`, which looks for any AWS resource still tagged for this project and fails if one remains. CloudFront teardown takes a few extra minutes; that's expected, not a hang.
 
 ## Architecture
 

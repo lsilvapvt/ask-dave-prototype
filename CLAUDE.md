@@ -47,9 +47,11 @@ askdave-prototype/
 ├── backend/
 │   ├── chat/handler.py                # POST /chat: calls the LLM, writes to S3, returns {prompt, response, timestamp}
 │   └── history/handler.py             # GET /history: lists and returns S3 objects, newest first
-├── infra/                             # Terraform (providers, variables, resources, outputs)
+├── infra/                             # Terraform: main.tf (naming), storage.tf, secrets.tf, ... one file per concern
 ├── scripts/
 │   ├── deploy.sh / destroy.sh
+│   ├── smoke-test.sh                  # post-deploy checks against the live stack
+│   ├── verify-destroyed.sh            # post-destroy leftover check (run by destroy.sh)
 │   ├── setup-dev.sh                   # local dev tooling (venvs)
 │   └── check.sh                       # local run of the CI static checks
 ├── tests/                             # pytest guard tests (hard constraints, destroy-cleanup rules)
@@ -60,7 +62,7 @@ askdave-prototype/
 
 1. **Never edit `frontend/index.html`.** It is a fixed, provided asset (a guard test checks its hash). Only `config.js` is generated at deploy time.
 2. **No hardcoded AWS account IDs, resource names, or ARNs anywhere.** It must deploy cleanly into a *different* AWS account, with *different* credentials and a *different* LLM API key. Use `data "aws_caller_identity"`, `random_id`/`random_pet` for globally unique names, and input variables with safe defaults for everything else.
-3. **The LLM API key must never appear** in the repo, in a plain Lambda environment variable, or anywhere outside Secrets Manager. It is supplied at deploy time (`TF_VAR_llm_api_key` or an untracked `.tfvars` file).
+3. **The LLM API key must never appear** in the repo, in a plain Lambda environment variable, or anywhere outside Secrets Manager. It is supplied at deploy time via `TF_VAR_llm_api_key`, as an `ephemeral` variable feeding the write-only `secret_string_wo`, so it never reaches Terraform state either.
 4. **Every AWS resource comes from Terraform, and `terraform destroy` must leave nothing behind.** S3 buckets need `force_destroy`, secrets need `recovery_window_in_days = 0`, and Lambda log groups must be Terraform-managed.
 5. **Keep the Lambda dependency footprint at zero** (stdlib, plus the boto3 the Lambda runtime already provides). No build step, layer, or Docker packaging.
 

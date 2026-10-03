@@ -50,7 +50,7 @@ def test_no_wildcard_iam_resources():
 
 def test_secret_like_variables_are_sensitive_and_required():
     for name, body in blocks(TF, "variable").items():
-        if re.search(r"key|secret|token|password", name):
+        if re.search(r"(key|secret|token|password)$", name):
             assert re.search(r"sensitive\s*=\s*true", body), f"variable {name} must be sensitive"
             assert not re.search(r"^\s*default\s*=", body, re.M), (
                 f"variable {name} must not have a default"
@@ -62,3 +62,21 @@ def test_no_aws_region_literals_outside_variable_defaults():
     source = TF.replace(blocks(TF, "variable").get("aws_region", ""), "")
     offenders = re.findall(r'"[a-z]{2}(?:-gov)?-[a-z]+-\d"', source)
     assert not offenders, f"Hardcoded region literals: {offenders}"
+
+
+def test_llm_api_key_is_ephemeral():
+    # Ephemeral variables are never written to Terraform state or plan files.
+    body = blocks(TF, "variable").get("llm_api_key")
+    assert body is not None, "variable llm_api_key must exist"
+    assert re.search(r"ephemeral\s*=\s*true", body), "variable llm_api_key must be ephemeral"
+
+
+def test_secret_values_use_write_only_arguments():
+    # secret_string would store the key in state in plain text; secret_string_wo does not.
+    for name, body in blocks(TF, "resource", "aws_secretsmanager_secret_version").items():
+        assert not re.search(r"^\s*secret_string\s*=", body, re.M), (
+            f"aws_secretsmanager_secret_version.{name} must use secret_string_wo, not secret_string"
+        )
+        assert "secret_string_wo_version" in body, (
+            f"aws_secretsmanager_secret_version.{name} needs secret_string_wo_version"
+        )

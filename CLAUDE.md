@@ -47,7 +47,7 @@ askdave-prototype/
 ├── backend/
 │   ├── chat/handler.py                # POST /chat: calls the LLM, writes to S3, returns {prompt, response, timestamp}
 │   └── history/handler.py             # GET /history: lists and returns S3 objects, newest first
-├── infra/                             # Terraform, one file per concern: main.tf (naming), storage.tf, secrets.tf, iam.tf, lambda.tf, api.tf
+├── infra/                             # Terraform, one file per concern: main.tf (naming), storage.tf, secrets.tf, iam.tf, lambda.tf, api.tf, cloudfront.tf
 ├── scripts/
 │   ├── deploy.sh / destroy.sh
 │   ├── smoke-test.sh                  # post-deploy checks against the live stack

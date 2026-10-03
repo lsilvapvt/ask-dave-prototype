@@ -11,11 +11,15 @@ failures=0
 pass() { echo "  ok    $1"; }
 fail() { echo "  FAIL  $1"; failures=$((failures + 1)); }
 check() { local name=$1; shift; if "$@" >/dev/null 2>&1; then pass "$name"; else fail "$name"; fi; }
+absent() { ! "$@"; }  # for checks that must NOT match
 
 out() { terraform output -raw "$1"; }
 region=$(out aws_region) || { echo "No deployed stack found (terraform output failed)." >&2; exit 1; }
 bucket=$(out data_bucket_name)
 secret_arn=$(out llm_api_key_secret_arn)
+api=$(out api_url)
+app=$(out app_url)
+frontend_bucket=$(out frontend_bucket_name)
 
 echo "Data bucket: $bucket"
 check "bucket exists" aws s3api head-bucket --bucket "$bucket" --region "$region"
@@ -41,8 +45,22 @@ else
   echo "  skip  key absent from Terraform state (TF_VAR_llm_api_key not set)"
 fi
 
+echo "Frontend (CloudFront):"
+echo "  $app"
+code=$(curl -s -o /dev/null -w '%{http_code}' "$app/")
+check "app URL returns 200 (got $code)" test "$code" = 200
+check "index.html served byte-for-byte unmodified" test \
+  "$(curl -s "$app/" | shasum -a 256 | cut -d' ' -f1)" = "$(shasum -a 256 < ../frontend/index.html | cut -d' ' -f1)"
+check "config.js points at the live API" grep -qF "\"$api\"" <<<"$(curl -s "$app/config.js")"
+code=$(curl -s -o /dev/null -w '%{http_code}' "http://${app#https://}/")
+check "plain HTTP redirects to HTTPS (got $code)" test "$code" = 301
+headers=$(curl -sI "$app/")
+check "HSTS security header present" grep -qi '^strict-transport-security:' <<<"$headers"
+check "index.html is not cached stale (no-cache)" grep -qi '^cache-control: no-cache' <<<"$headers"
+code=$(curl -s -o /dev/null -w '%{http_code}' "https://${frontend_bucket}.s3.${region}.amazonaws.com/index.html")
+check "bucket not readable directly, only via CloudFront (HTTP $code)" test "$code" = 403
+
 echo "API (GET /history):"
-api=$(out api_url)
 echo "  $api"
 samples=()
 chat_prefixes=()
@@ -82,10 +100,12 @@ check "samples come back newest first" json_check \
 check "corrupt object skipped, not fatal" json_check 'all(set(i) == {"prompt","response","timestamp"} for i in b)' <<<"$body"
 check "whole list is newest first" json_check '[i["timestamp"] for i in b] == sorted((i["timestamp"] for i in b), reverse=True)' <<<"$body"
 
-headers=$(curl -s -o /dev/null -D - -X OPTIONS "$api/history" \
-  -H "Origin: https://example.com" -H "Access-Control-Request-Method: POST" \
-  -H "Access-Control-Request-Headers: content-type")
-check "CORS preflight allows the page's POST" grep -qi '^access-control-allow-origin:' <<<"$headers"
+preflight() {
+  curl -s -o /dev/null -D - -X OPTIONS "$api/chat" -H "Origin: $1" \
+    -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type"
+}
+check "CORS preflight allows the app's own origin" grep -qi "^access-control-allow-origin: $app" <<<"$(preflight "$app")"
+check "CORS refuses other websites' origins" absent grep -qi '^access-control-allow-origin:' <<<"$(preflight https://example.com)"
 code=$(curl -s -o /dev/null -w '%{http_code}' "$api/no-such-route")
 check "unknown route returns 404 (got $code)" test "$code" = 404
 

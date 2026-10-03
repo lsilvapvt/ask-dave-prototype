@@ -20,11 +20,13 @@ if [[ -z "${TF_VAR_llm_api_key:-}" ]]; then
 fi
 
 terraform init -input=false
+echo "Deploying. A first deploy takes about 5 minutes while CloudFront publishes the site."
 terraform apply -auto-approve -input=false
 
 echo
 if app_url=$(terraform output -raw app_url 2>/dev/null); then
   echo "App URL: $app_url"
 else
-  echo "Deployed. There is no app URL yet: the frontend is added in a later iteration."
+  echo "Deployed, but no app_url output was found." >&2
+  exit 1
 fi

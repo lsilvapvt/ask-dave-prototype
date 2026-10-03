@@ -126,6 +126,10 @@ def test_sends_a_well_formed_anthropic_request(chat, monkeypatch):
 def test_round_trip_chat_then_history_newest_first(chat, monkeypatch):
     module, fake_s3, _ = chat
     use_http(monkeypatch, module, anthropic_message("one"), anthropic_message("two"))
+    # Pin distinct timestamps: two calls can land in the same millisecond, and then
+    # their order would depend on the random part of the key.
+    stamps = iter(["2026-10-03T12:00:00.000Z", "2026-10-03T12:00:00.001Z"])
+    monkeypatch.setattr(module, "utc_timestamp", lambda: next(stamps))
     post(module, {"prompt": "first"})
     post(module, {"prompt": "second"})
 

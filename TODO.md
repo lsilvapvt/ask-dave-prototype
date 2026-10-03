@@ -10,7 +10,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 2. [x] Storage and secret: data bucket, Secrets Manager secret (write-only, `recovery_window_in_days = 0`), default tags, `scripts/smoke-test.sh`, `scripts/verify-destroyed.sh`
 3. [x] `history` Lambda + HTTP API `GET /history` (Terraform-managed log groups, scoped IAM, CORS, access logs, handler unit tests)
 4. [x] `chat` Lambda + `POST /chat` (Anthropic Messages API, default model `claude-haiku-4-5`; live-tested end to end)
-5. [ ] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain
+5. [x] Frontend bucket + CloudFront/OAC + `index.html` and rendered `config.js` (no-cache), CORS narrowed to the CloudFront domain; verified in headless Chrome
 6. [ ] CloudWatch `Errors` alarms (optional SNS email)
 7. [ ] API throttling, deploy-script polish, fresh-account rehearsal, README write-up
 
@@ -19,7 +19,7 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [x] `infra/providers.tf` — AWS provider, required Terraform version, local state (remote state deliberately not used, see architecture-decisions.md)
 - [x] `infra/variables.tf` — region, project prefix, `llm_api_key` (sensitive, ephemeral, no default), `llm_api_key_version` (model/provider config arrives with the chat iteration)
 - [x] S3 history data bucket: `force_destroy`, public access blocked, SSE-S3, ACLs disabled, HTTPS-only policy, `random_id` suffix
-- [ ] S3 frontend bucket (CloudFront iteration)
+- [x] S3 frontend bucket (same hardening, readable only by this CloudFront distribution)
 - [x] Secrets Manager secret holding `llm_api_key` (write-only value: never in Terraform state)
 - [x] IAM role + policy for `chat` Lambda (`GetSecretValue` on the one secret, `PutObject` on `history/*`, own log group; verified with the IAM policy simulator)
 - [x] IAM role + policy for `history` Lambda (`ListBucket` limited to `history/`, `GetObject` on `history/*`, writes only its own log group; verified with the IAM policy simulator)
@@ -27,11 +27,11 @@ Each iteration deploys a working slice, is verified with a scripted check, then 
 - [x] `backend/history/handler.py` — list + fetch recent S3 objects under `history/`, return newest-first (corrupt objects skipped and logged)
 - [x] Lambda function resources (zip via `archive_file` data source — no external deps, no layer)
 - [x] API Gateway HTTP API with `POST /chat` and `GET /history` routes, Lambda proxy integrations, CORS enabled
-- [ ] CloudFront distribution + Origin Access Control in front of the frontend bucket
-- [ ] `frontend/config.js.tmpl` rendered via `templatefile()` with the live API Gateway URL, uploaded as `aws_s3_object` (not committed as a static file — deploy-time generated)
-- [ ] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file)
+- [x] CloudFront distribution + Origin Access Control in front of the frontend bucket
+- [x] `frontend/config.js.tmpl` rendered via `templatefile()` with the live API Gateway URL, uploaded as `aws_s3_object` (not committed as a static file — deploy-time generated)
+- [x] Upload `frontend/index.html` to the frontend bucket via Terraform (unmodified — never hand-edit this file; smoke test compares checksums)
 - [ ] CloudWatch alarm on the `chat`/`history` Lambdas' `Errors` metric
-- [ ] `infra/outputs.tf` — `app_url` (CloudFront domain), API Gateway URL (for debugging)
+- [x] `infra/outputs.tf` — `app_url` (CloudFront domain), API Gateway URL (for debugging)
 - [x] `scripts/deploy.sh` — prompts for the key if unset, `init` + `apply`, prints `app_url` once it exists
 - [x] `scripts/destroy.sh` — destroys without needing the real key, then runs `verify-destroyed.sh`
 - [ ] End-to-end test: run `deploy.sh` fresh, confirm chat works and history loads with zero manual steps, then run `destroy.sh` and confirm nothing is left in the AWS account

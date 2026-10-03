@@ -6,10 +6,11 @@ resource "aws_apigatewayv2_api" "http" {
   description   = "${var.project_name} backend API"
 
   # The page is served from another origin (CloudFront), and POST /chat sends
-  # Content-Type: application/json, which triggers a CORS preflight. Origins are
-  # narrowed to the CloudFront domain once the frontend exists.
+  # Content-Type: application/json, which triggers a CORS preflight. Only the app's
+  # own CloudFront origin is allowed, so other websites can't call the API from a
+  # visitor's browser.
   cors_configuration {
-    allow_origins = ["*"]
+    allow_origins = ["https://${aws_cloudfront_distribution.frontend.domain_name}"]
     allow_methods = ["GET", "POST", "OPTIONS"]
     allow_headers = ["content-type"]
     max_age       = 3600

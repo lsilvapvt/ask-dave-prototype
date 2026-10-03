@@ -27,6 +27,8 @@ The model defaults to Claude Haiku 4.5, the fastest and cheapest current Claude 
 ./scripts/deploy.sh
 ```
 
+It prints the app URL at the end. A first deploy takes roughly 3-5 minutes, most of it CloudFront publishing the site; open the URL as soon as the command finishes.
+
 To check the deployed stack afterwards (it adds a few sample history entries, asks the model one short question for a fraction of a cent, and removes everything it created):
 
 ```bash

@@ -136,3 +136,50 @@ def test_llm_key_only_flows_into_the_write_only_secret():
     code = "\n".join(line for line in TF.splitlines() if not line.lstrip().startswith(("#", "//")))
     uses = re.findall(r"^\s*(\w+)\s*=.*\bvar\.llm_api_key\b(?!_)", code, re.M)
     assert sorted(uses) == ["condition", "secret_string_wo"], f"var.llm_api_key used in: {uses}"
+
+
+def test_public_access_blocks_are_never_relaxed():
+    for name, body in blocks(TF, "resource", "aws_s3_bucket_public_access_block").items():
+        assert not re.search(r"=\s*false", body), f"public access block {name} relaxes a setting"
+
+
+def test_every_bucket_gets_the_shared_hardening():
+    # storage.tf applies public access blocks, ownership controls and encryption to
+    # every bucket listed in local.buckets; a new bucket must be added there too.
+    buckets = set(blocks(TF, "resource", "aws_s3_bucket"))
+    listed = set(re.findall(r"=\s*aws_s3_bucket\.(\w+)\.id", TF.split("buckets = {", 1)[-1]))
+    assert buckets <= listed, f"buckets missing from local.buckets: {sorted(buckets - listed)}"
+
+
+def test_cloudfront_serves_https_only():
+    for name, body in blocks(TF, "resource", "aws_cloudfront_distribution").items():
+        policies = re.findall(r'viewer_protocol_policy\s*=\s*"([^"]+)"', body)
+        assert policies and set(policies) <= {"redirect-to-https", "https-only"}, (
+            f"aws_cloudfront_distribution.{name} must not serve plain HTTP"
+        )
+
+
+def test_frontend_bucket_is_readable_only_by_this_distribution():
+    policy = blocks(TF, "data", "aws_iam_policy_document").get("frontend_bucket")
+    if policy is None:
+        return
+    assert '"cloudfront.amazonaws.com"' in policy
+    assert "AWS:SourceArn" in policy and "aws_cloudfront_distribution." in policy
+
+
+def test_index_html_is_uploaded_unmodified_from_the_repo():
+    objects = blocks(TF, "resource", "aws_s3_object")
+    index = [b for b in objects.values() if re.search(r'key\s*=\s*"index\.html"', b)]
+    if not index:
+        return
+    [body] = index
+    assert re.search(r'source\s*=\s*"\$\{path\.module\}/\.\./frontend/index\.html"', body)
+    assert not re.search(r"^\s*content\s*=", body, re.M), "index.html must come from the file"
+
+
+def test_cors_is_not_open_to_every_origin_once_the_frontend_exists():
+    if not blocks(TF, "resource", "aws_cloudfront_distribution"):
+        return
+    assert not re.search(r'allow_origins\s*=\s*\[\s*"\*"', TF), (
+        "with the frontend deployed, CORS must allow only the CloudFront origin"
+    )

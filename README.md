@@ -28,7 +28,7 @@ AskDave is a small AI chat tool on AWS. You ask a question in a web page, Claude
    ```
 
    With SSH keys set up on GitHub, `git clone git@github.com:lsilvapvt/ask-dave-prototype.git` works too.
-   
+
 
 
 2. **Load your Anthropic API key into the terminal session.** Run this command:
@@ -204,3 +204,11 @@ tests/                        unit tests and guard tests (pytest)
 docs/                         requirements and architecture decisions
 images/                       README screenshot
 ```
+
+---
+
+## Troubleshooting
+
+**Deploy fails with "Your account must be verified before you can add new CloudFront resources".** This is an account-level hold from AWS, not a problem with the code; it can affect new accounts, especially after several CloudFront distributions are created and deleted in a short time. Open a free AWS Support case (Support, Create case, "Account and billing"), paste the full error message, and deploy again once AWS confirms. Meanwhile, `./scripts/destroy.sh` removes the resources the partial deploy did create.
+
+---
